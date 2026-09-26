@@ -406,7 +406,7 @@ for dataset_name, df in datasets.items():
         .str.len()
     )
 
-        address_length = (
+    address_length = ( 
             df["business_address"]
             .fillna("")
             .astype("string")
