@@ -1,0 +1,7 @@
+dataset	rows	columns	duplicate_rows	duplicate_entity_ids	unique_entity_ids
+train_source1	2206821	4	0	0	2206821
+train_source2	5034616	4	0	0	5034616
+train_source3	5285603	4	0	0	5285603
+test_source1	1732544	4	0	0	1732544
+test_source2	4887273	4	0	0	4887273
+test_source3	5082316	4	0	0	5082316

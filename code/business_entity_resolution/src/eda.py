@@ -1,4 +1,8 @@
+from __future__ import annotations
+
+import sys
 from pathlib import Path
+
 import matplotlib
 
 matplotlib.use("Agg")
@@ -6,10 +10,24 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
 
+
+# ============================================================
+# IMPORT PREPROCESSING
+# ============================================================
+
+SRC_DIR = Path(__file__).resolve().parent
+
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+
 from preprocessing import preprocess_dataframe
 
 
-def find_project_root():
+# ============================================================
+# PATHS
+# ============================================================
+
+def find_project_root() -> Path:
     current_file = Path(__file__).resolve()
 
     for parent in [current_file.parent, *current_file.parents]:
@@ -28,56 +46,16 @@ ROOT_DIR = find_project_root()
 
 TRAIN_DIR = ROOT_DIR / "dataset" / "train"
 TEST_DIR = ROOT_DIR / "dataset" / "test"
-PROCESSED_DIR = ROOT_DIR / "processed"
+
 EDA_DIR = ROOT_DIR / "eda_reports"
-
-EDA_DIR.mkdir(
-    parents=True,
-    exist_ok=True
-)
-
-SOURCE_FILES = {
-    "train_source1": TRAIN_DIR / "train_source1.tsv",
-    "train_source2": TRAIN_DIR / "train_source2.tsv",
-    "train_source3": TRAIN_DIR / "train_source3.tsv",
-    "test_source1": TEST_DIR / "test_source1.tsv",
-    "test_source2": TEST_DIR / "test_source2.tsv",
-    "test_source3": TEST_DIR / "test_source3.tsv",
-}
-
-PROCESSED_FILES = {
-    "train_source1": PROCESSED_DIR / "train" / "source1_processed.tsv",
-    "train_source2": PROCESSED_DIR / "train" / "source2_processed.tsv",
-    "train_source3": PROCESSED_DIR / "train" / "source3_processed.tsv",
-    "test_source1": PROCESSED_DIR / "test" / "source1_processed.tsv",
-    "test_source2": PROCESSED_DIR / "test" / "source2_processed.tsv",
-    "test_source3": PROCESSED_DIR / "test" / "source3_processed.tsv",
-}
-
-RAW_FIELDS = [
-    "entity_id",
-    "business_name",
-    "business_address",
-    "country",
-]
-
-PROCESSED_FIELDS = [
-    "business_name_clean",
-    "business_name_core",
-    "business_name_compact",
-    "business_name_ascii",
-    "business_name_core_ascii",
-    "business_name_token_sorted",
-    "business_address_clean",
-    "address_compact",
-    "business_address_ascii",
-    "business_address_token_sorted",
-    "address_numbers",
-    "country_clean",
-]
+EDA_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def load_tsv(path, usecols=None):
+# ============================================================
+# DATA LOADING
+# ============================================================
+
+def load_tsv(path: Path) -> pd.DataFrame:
     if not path.exists():
         raise FileNotFoundError(
             f"File not found: {path}"
@@ -88,11 +66,201 @@ def load_tsv(path, usecols=None):
         sep="\t",
         dtype="string",
         keep_default_na=False,
-        usecols=usecols
     )
 
 
-def collision_stats(df, column):
+print("=" * 80)
+print("LOADING DATA")
+print("=" * 80)
+
+train_source1 = load_tsv(
+    TRAIN_DIR / "train_source1.tsv"
+)
+
+train_source2 = load_tsv(
+    TRAIN_DIR / "train_source2.tsv"
+)
+
+train_source3 = load_tsv(
+    TRAIN_DIR / "train_source3.tsv"
+)
+
+ground_truth = load_tsv(
+    TRAIN_DIR / "train_ground_truth.tsv"
+)
+
+test_source1 = load_tsv(
+    TEST_DIR / "test_source1.tsv"
+)
+
+test_source2 = load_tsv(
+    TEST_DIR / "test_source2.tsv"
+)
+
+test_source3 = load_tsv(
+    TEST_DIR / "test_source3.tsv"
+)
+
+
+datasets = {
+    "train_source1": train_source1,
+    "train_source2": train_source2,
+    "train_source3": train_source3,
+    "test_source1": test_source1,
+    "test_source2": test_source2,
+    "test_source3": test_source3,
+}
+
+
+EXPECTED_COLUMNS = {
+    "entity_id",
+    "business_name",
+    "business_address",
+    "country",
+}
+
+
+# ============================================================
+# SCHEMA VALIDATION
+# ============================================================
+
+print("\n" + "=" * 80)
+print("SCHEMA VALIDATION")
+print("=" * 80)
+
+for name, df in datasets.items():
+
+    missing = EXPECTED_COLUMNS - set(df.columns)
+
+    print(f"\n{name}")
+    print("Shape:", df.shape)
+    print("Columns:", df.columns.tolist())
+
+    if missing:
+        print("ERROR - Missing columns:", sorted(missing))
+    else:
+        print("Schema: OK")
+
+
+print("\nGround truth")
+print("Shape:", ground_truth.shape)
+print("Columns:", ground_truth.columns.tolist())
+
+
+# ============================================================
+# BASIC DATASET SUMMARY
+# ============================================================
+
+summary_rows = []
+
+for name, df in datasets.items():
+
+    summary_rows.append({
+        "dataset": name,
+        "rows": len(df),
+        "columns": len(df.columns),
+        "duplicate_rows": int(df.duplicated().sum()),
+        "duplicate_entity_ids": int(
+            df["entity_id"].duplicated().sum()
+        ),
+        "unique_entity_ids": int(
+            df["entity_id"].nunique()
+        ),
+    })
+
+dataset_summary = pd.DataFrame(summary_rows)
+
+print("\n" + "=" * 80)
+print("DATASET SUMMARY")
+print("=" * 80)
+
+print(
+    dataset_summary.to_string(index=False)
+)
+
+dataset_summary.to_csv(
+    EDA_DIR / "dataset_summary.tsv",
+    sep="\t",
+    index=False,
+)
+
+
+# ============================================================
+# FIELD QUALITY
+# ============================================================
+
+field_rows = []
+
+FIELDS = [
+    "entity_id",
+    "business_name",
+    "business_address",
+    "country",
+]
+
+
+for dataset_name, df in datasets.items():
+
+    for field in FIELDS:
+
+        series = (
+            df[field]
+            .fillna("")
+            .astype("string")
+            .str.strip()
+        )
+
+        missing_mask = series.eq("")
+
+        field_rows.append({
+            "dataset": dataset_name,
+            "field": field,
+            "rows": len(df),
+            "missing_count": int(
+                missing_mask.sum()
+            ),
+            "missing_percentage": round(
+                missing_mask.mean() * 100,
+                4,
+            ),
+            "unique_values": int(
+                series.nunique(dropna=False)
+            ),
+            "unique_percentage": round(
+                series.nunique(dropna=False)
+                / len(df)
+                * 100,
+                4,
+            ),
+        })
+
+
+field_quality = pd.DataFrame(field_rows)
+
+print("\n" + "=" * 80)
+print("FIELD QUALITY")
+print("=" * 80)
+
+print(
+    field_quality.to_string(index=False)
+)
+
+field_quality.to_csv(
+    EDA_DIR / "field_quality.tsv",
+    sep="\t",
+    index=False,
+)
+
+
+# ============================================================
+# DUPLICATE / COLLISION ANALYSIS
+# ============================================================
+
+def collision_stats(
+    df: pd.DataFrame,
+    column: str,
+) -> dict:
+
     series = (
         df[column]
         .fillna("")
@@ -109,7 +277,7 @@ def collision_stats(df, column):
             "repeated_values": 0,
             "rows_in_collisions": 0,
             "collision_row_percentage": 0.0,
-            "max_frequency": 0
+            "max_frequency": 0,
         }
 
     counts = nonempty.value_counts()
@@ -122,177 +290,121 @@ def collision_stats(df, column):
         "repeated_values": int(len(repeated)),
         "rows_in_collisions": int(repeated.sum()),
         "collision_row_percentage": round(
-            repeated.sum() / len(nonempty) * 100,
-            4
+            repeated.sum()
+            / len(nonempty)
+            * 100,
+            4,
         ),
-        "max_frequency": int(counts.max())
+        "max_frequency": int(counts.max()),
     }
 
 
-def build_dataset_summary():
-    rows = []
+print("\n" + "=" * 80)
+print("RAW COLLISION ANALYSIS")
+print("=" * 80)
 
-    for dataset_name, path in SOURCE_FILES.items():
-        df = load_tsv(
-            path,
-            usecols=RAW_FIELDS
+collision_rows = []
+
+for dataset_name, df in datasets.items():
+
+    for field in [
+        "business_name",
+        "business_address",
+        "country",
+    ]:
+
+        stats = collision_stats(
+            df,
+            field,
         )
 
-        rows.append({
+        collision_rows.append({
             "dataset": dataset_name,
-            "rows": len(df),
-            "columns": len(df.columns),
-            "duplicate_rows": int(
-                df.duplicated().sum()
-            ),
-            "duplicate_entity_ids": int(
-                df["entity_id"].duplicated().sum()
-            ),
-            "unique_entity_ids": int(
-                df["entity_id"].nunique()
-            )
+            "field": field,
+            **stats,
         })
 
-        del df
 
-    return pd.DataFrame(rows)
+raw_collision_report = pd.DataFrame(
+    collision_rows
+)
 
+print(
+    raw_collision_report.to_string(index=False)
+)
 
-def build_field_quality():
-    rows = []
-
-    for dataset_name, path in SOURCE_FILES.items():
-        df = load_tsv(
-            path,
-            usecols=RAW_FIELDS
-        )
-
-        for field in RAW_FIELDS:
-            series = (
-                df[field]
-                .fillna("")
-                .astype("string")
-                .str.strip()
-            )
-
-            missing_mask = series.eq("")
-
-            rows.append({
-                "dataset": dataset_name,
-                "field": field,
-                "rows": len(df),
-                "missing_count": int(
-                    missing_mask.sum()
-                ),
-                "missing_percentage": round(
-                    missing_mask.mean() * 100,
-                    4
-                ),
-                "unique_values": int(
-                    series.nunique(
-                        dropna=False
-                    )
-                ),
-                "unique_percentage": round(
-                    series.nunique(
-                        dropna=False
-                    ) / len(df) * 100,
-                    4
-                )
-            })
-
-        del df
-
-    return pd.DataFrame(rows)
+raw_collision_report.to_csv(
+    EDA_DIR / "raw_collision_report.tsv",
+    sep="\t",
+    index=False,
+)
 
 
-def build_raw_collision_report():
-    rows = []
+# ============================================================
+# COUNTRY DISTRIBUTION
+# ============================================================
 
-    for dataset_name, path in SOURCE_FILES.items():
-        df = load_tsv(
-            path,
-            usecols=[
-                "business_name",
-                "business_address",
-                "country"
-            ]
-        )
+print("\n" + "=" * 80)
+print("COUNTRY DISTRIBUTION")
+print("=" * 80)
 
-        for field in [
-            "business_name",
-            "business_address",
-            "country"
-        ]:
-            stats = collision_stats(
-                df,
-                field
-            )
+country_rows = []
 
-            rows.append({
-                "dataset": dataset_name,
-                "field": field,
-                **stats
-            })
+for dataset_name, df in datasets.items():
 
-        del df
+    counts = (
+        df["country"]
+        .fillna("")
+        .astype("string")
+        .str.strip()
+        .value_counts(dropna=False)
+    )
 
-    return pd.DataFrame(rows)
+    for country, count in counts.items():
 
-
-def build_country_report():
-    rows = []
-
-    for dataset_name, path in SOURCE_FILES.items():
-        df = load_tsv(
-            path,
-            usecols=["country"]
-        )
-
-        counts = (
-            df["country"]
-            .fillna("")
-            .astype("string")
-            .str.strip()
-            .value_counts(
-                dropna=False
-            )
-        )
-
-        for country, count in counts.items():
-            rows.append({
-                "dataset": dataset_name,
-                "country": country,
-                "count": int(count),
-                "percentage": round(
-                    count / len(df) * 100,
-                    4
-                )
-            })
-
-        del df
-
-    return pd.DataFrame(rows)
+        country_rows.append({
+            "dataset": dataset_name,
+            "country": country,
+            "count": int(count),
+            "percentage": round(
+                count / len(df) * 100,
+                4,
+            ),
+        })
 
 
-def build_length_report():
-    rows = []
+country_report = pd.DataFrame(country_rows)
 
-    for dataset_name, path in SOURCE_FILES.items():
-        df = load_tsv(
-            path,
-            usecols=[
-                "business_name",
-                "business_address"
-            ]
-        )
+print(
+    country_report
+    .sort_values(
+        ["dataset", "count"],
+        ascending=[True, False],
+    )
+    .to_string(index=False)
+)
 
-        name_length = (
-            df["business_name"]
-            .fillna("")
-            .astype("string")
-            .str.len()
-        )
+country_report.to_csv(
+    EDA_DIR / "country_distribution.tsv",
+    sep="\t",
+    index=False,
+)
+
+
+# ============================================================
+# STRING LENGTH ANALYSIS
+# ============================================================
+
+length_rows = []
+
+for dataset_name, df in datasets.items():
+
+    name_length = (
+        df["business_name"]
+        .fillna("")
+        .astype("string")
+        .str.len()
+    )
 
         address_length = (
             df["business_address"]
@@ -301,96 +413,102 @@ def build_length_report():
             .str.len()
         )
 
-        name_words = (
-            df["business_name"]
-            .fillna("")
-            .astype("string")
-            .str.split()
-            .str.len()
-        )
+    name_words = (
+        df["business_name"]
+        .fillna("")
+        .astype("string")
+        .str.split()
+        .str.len() # type: ignore
+    )
 
-        address_words = (
-            df["business_address"]
-            .fillna("")
-            .astype("string")
-            .str.split()
-            .str.len()
-        )
+    address_words = (
+        df["business_address"]
+        .fillna("")
+        .astype(str)
+        .str.split()
+        .str.len() # type: ignore
+    )
 
-        rows.extend([
-            {
-                "dataset": dataset_name,
-                "field": "business_name",
-                "metric": "characters_mean",
-                "value": float(
-                    name_length.mean()
-                )
-            },
-            {
-                "dataset": dataset_name,
-                "field": "business_name",
-                "metric": "characters_median",
-                "value": float(
-                    name_length.median()
-                )
-            },
-            {
-                "dataset": dataset_name,
-                "field": "business_name",
-                "metric": "characters_p99",
-                "value": float(
-                    name_length.quantile(0.99)
-                )
-            },
-            {
-                "dataset": dataset_name,
-                "field": "business_name",
-                "metric": "words_mean",
-                "value": float(
-                    name_words.mean()
-                )
-            },
-            {
-                "dataset": dataset_name,
-                "field": "business_address",
-                "metric": "characters_mean",
-                "value": float(
-                    address_length.mean()
-                )
-            },
-            {
-                "dataset": dataset_name,
-                "field": "business_address",
-                "metric": "characters_median",
-                "value": float(
-                    address_length.median()
-                )
-            },
-            {
-                "dataset": dataset_name,
-                "field": "business_address",
-                "metric": "characters_p99",
-                "value": float(
-                    address_length.quantile(0.99)
-                )
-            },
-            {
-                "dataset": dataset_name,
-                "field": "business_address",
-                "metric": "words_mean",
-                "value": float(
-                    address_words.mean()
-                )
-            }
-        ])
-
-        del df
-
-    return pd.DataFrame(rows)
+    length_rows.extend([
+        {
+            "dataset": dataset_name,
+            "field": "business_name",
+            "metric": "characters_mean",
+            "value": float(name_length.mean()),
+        },
+        {
+            "dataset": dataset_name,
+            "field": "business_name",
+            "metric": "characters_median",
+            "value": float(name_length.median()),
+        },
+        {
+            "dataset": dataset_name,
+            "field": "business_name",
+            "metric": "characters_p99",
+            "value": float(name_length.quantile(0.99)),
+        },
+        {
+            "dataset": dataset_name,
+            "field": "business_name",
+            "metric": "words_mean",
+            "value": float(name_words.mean()),
+        },
+        {
+            "dataset": dataset_name,
+            "field": "business_address",
+            "metric": "characters_mean",
+            "value": float(address_length.mean()),
+        },
+        {
+            "dataset": dataset_name,
+            "field": "business_address",
+            "metric": "characters_median",
+            "value": float(address_length.median()),
+        },
+        {
+            "dataset": dataset_name,
+            "field": "business_address",
+            "metric": "characters_p99",
+            "value": float(address_length.quantile(0.99)),
+        },
+        {
+            "dataset": dataset_name,
+            "field": "business_address",
+            "metric": "words_mean",
+            "value": float(address_words.mean()),
+        },
+    ])
 
 
-def parse_match_ids(value):
-    if value is None or pd.isna(value):
+length_report = pd.DataFrame(length_rows)
+
+print("\n" + "=" * 80)
+print("STRING LENGTH ANALYSIS")
+print("=" * 80)
+
+print(
+    length_report.to_string(index=False)
+)
+
+length_report.to_csv(
+    EDA_DIR / "length_report.tsv",
+    sep="\t",
+    index=False,
+)
+
+
+# ============================================================
+# GROUND TRUTH PARSING
+# ============================================================
+
+print("\n" + "=" * 80)
+print("GROUND TRUTH ANALYSIS")
+print("=" * 80)
+
+
+def split_match_ids(value: object) -> list[str]:
+    if value is None or pd.isna(value): # type: ignore
         return []
 
     text = str(value).strip()
@@ -405,705 +523,869 @@ def parse_match_ids(value):
     ]
 
 
-def load_ground_truth():
-    return load_tsv(
-        TRAIN_DIR / "train_ground_truth.tsv"
-    )
+gt = ground_truth.copy()
+
+gt["matched_ids_list"] = (
+    gt["matched_entity_ids"]
+    .apply(split_match_ids)
+)
+
+gt["num_matches"] = (
+    gt["matched_ids_list"]
+    .str.len()
+)
+
+print("\nMatch count distribution:")
+
+print(
+    gt["num_matches"]
+    .value_counts()
+    .sort_index()
+    .to_string()
+)
+
+print("\nMatch count statistics:")
+
+print(
+    gt["num_matches"].describe()
+)
 
 
-def build_ground_truth_analysis(ground_truth):
-    gt = ground_truth.copy()
+# ============================================================
+# GROUND TRUTH VALIDATION
+# ============================================================
 
-    gt["matched_ids_list"] = (
-        gt["matched_entity_ids"]
-        .apply(parse_match_ids)
-    )
+source2_ids = set(
+    train_source2["entity_id"].astype(str)
+)
 
-    gt["num_matches"] = (
-        gt["matched_ids_list"]
-        .str.len()
-    )
+source3_ids = set(
+    train_source3["entity_id"].astype(str)
+)
 
-    match_distribution = (
-        gt["num_matches"]
-        .value_counts()
-        .sort_index()
-        .rename_axis("num_matches")
-        .reset_index(
-            name="source1_entities"
-        )
-    )
+source1_ids = set(
+    train_source1["entity_id"].astype(str)
+)
 
-    match_distribution["percentage"] = (
-        match_distribution["source1_entities"]
-        / len(gt)
-        * 100
-    ).round(4)
-
-    return gt, match_distribution
+valid_target_ids = source2_ids | source3_ids
 
 
-def build_processed_collision_report():
-    rows = []
+invalid_target_ids = []
+duplicate_target_rows = []
 
-    for dataset_name, path in PROCESSED_FILES.items():
-        df = load_tsv(
-            path,
-            usecols=PROCESSED_FIELDS
-        )
+for _, row in gt.iterrows():
 
-        for field in PROCESSED_FIELDS:
-            stats = collision_stats(
-                df,
-                field
-            )
+    matched_ids = row["matched_ids_list"]
 
-            rows.append({
-                "dataset": dataset_name,
-                "field": field,
-                **stats
-            })
-
-        del df
-
-    return pd.DataFrame(rows)
-
-
-def build_transformation_examples(
-    sample_size=1000
-):
-    rows = []
-
-    for dataset_name, path in SOURCE_FILES.items():
-        df = load_tsv(
-            path,
-            usecols=RAW_FIELDS
-        ).head(sample_size)
-
-        processed = preprocess_dataframe(
-            df
-        )
-
-        for index in range(len(df)):
-            raw_name = str(
-                df.iloc[index]["business_name"]
-            )
-
-            clean_name = str(
-                processed.iloc[index][
-                    "business_name_clean"
-                ]
-            )
-
-            core_name = str(
-                processed.iloc[index][
-                    "business_name_core"
-                ]
-            )
-
-            raw_address = str(
-                df.iloc[index]["business_address"]
-            )
-
-            clean_address = str(
-                processed.iloc[index][
-                    "business_address_clean"
-                ]
-            )
-
-            if (
-                raw_name != clean_name
-                or clean_name != core_name
-                or raw_address != clean_address
-            ):
-                rows.append({
-                    "dataset": dataset_name,
-                    "entity_id": str(
-                        df.iloc[index]["entity_id"]
-                    ),
-                    "raw_name": raw_name,
-                    "clean_name": clean_name,
-                    "core_name": core_name,
-                    "raw_address": raw_address,
-                    "clean_address": clean_address
-                })
-
-        del df
-        del processed
-
-    return pd.DataFrame(rows)
-
-
-def build_true_match_pairs(
-    ground_truth
-):
-    pairs = ground_truth.copy()
-
-    pairs["matched_ids_list"] = (
-        pairs["matched_entity_ids"]
-        .apply(parse_match_ids)
-    )
-
-    pairs = pairs[
-        [
-            "source1_entity_id",
-            "matched_ids_list"
-        ]
+    invalid = [
+        entity_id
+        for entity_id in matched_ids
+        if entity_id not in valid_target_ids
     ]
 
-    pairs = pairs.explode(
-        "matched_ids_list"
+    if invalid:
+        invalid_target_ids.append({
+            "source1_entity_id": row["source1_entity_id"],
+            "invalid_ids": ",".join(invalid),
+        })
+
+    if len(matched_ids) != len(set(matched_ids)):
+        duplicate_target_rows.append(
+            row["source1_entity_id"]
+        )
+
+
+print("\nGround truth validation")
+
+print(
+    "Invalid target IDs:",
+    len(invalid_target_ids),
+)
+
+print(
+    "Rows containing duplicate matched IDs:",
+    len(duplicate_target_rows),
+)
+
+print(
+    "Source 1 IDs missing from Source 1:",
+    sum(
+        str(x) not in source1_ids
+        for x in gt["source1_entity_id"]
+    ),
+)
+
+
+# ============================================================
+# S2 / S3 MATCH DISTRIBUTION
+# ============================================================
+
+def classify_match_sources(
+    matched_ids: list[str],
+) -> str:
+
+    has_s2 = any(
+        entity_id in source2_ids
+        for entity_id in matched_ids
     )
 
-    pairs = pairs.rename(
-        columns={
-            "matched_ids_list":
-                "matched_entity_id"
-        }
+    has_s3 = any(
+        entity_id in source3_ids
+        for entity_id in matched_ids
     )
 
-    pairs["matched_entity_id"] = (
-        pairs["matched_entity_id"]
-        .fillna("")
-        .astype("string")
-        .str.strip()
-    )
+    if has_s2 and has_s3:
+        return "S2_and_S3"
 
-    pairs = pairs[
-        pairs["matched_entity_id"] != ""
+    if has_s2:
+        return "S2_only"
+
+    if has_s3:
+        return "S3_only"
+
+    if not matched_ids:
+        return "No_match"
+
+    return "Invalid"
+
+
+gt["match_source_type"] = (
+    gt["matched_ids_list"]
+    .apply(classify_match_sources)
+)
+
+print("\nMatch source distribution:")
+
+print(
+    gt["match_source_type"]
+    .value_counts()
+    .to_string()
+)
+
+
+ground_truth_summary = (
+    gt["num_matches"]
+    .value_counts()
+    .sort_index()
+    .rename_axis("num_matches")
+    .reset_index(name="source1_entities")
+)
+
+ground_truth_summary["percentage"] = (
+    ground_truth_summary["source1_entities"]
+    / len(gt)
+    * 100
+).round(4)
+
+ground_truth_summary.to_csv(
+    EDA_DIR / "ground_truth_match_distribution.tsv",
+    sep="\t",
+    index=False,
+)
+
+gt[
+    [
+        "source1_entity_id",
+        "matched_entity_ids",
+        "num_matches",
+        "match_source_type",
     ]
+].to_csv(
+    EDA_DIR / "ground_truth_parsed.tsv",
+    sep="\t",
+    index=False,
+)
 
-    return pairs
+
+# ============================================================
+# PREPROCESS DATA
+# ============================================================
+
+print("\n" + "=" * 80)
+print("RUNNING PREPROCESSING FOR EVALUATION")
+print("=" * 80)
+
+train_source1_processed = preprocess_dataframe(
+    train_source1
+)
+
+train_source2_processed = preprocess_dataframe(
+    train_source2
+)
+
+train_source3_processed = preprocess_dataframe(
+    train_source3
+)
+
+test_source1_processed = preprocess_dataframe(
+    test_source1
+)
+
+test_source2_processed = preprocess_dataframe(
+    test_source2
+)
+
+test_source3_processed = preprocess_dataframe(
+    test_source3
+)
 
 
-def build_true_match_preprocessing_evaluation(
-    ground_truth
-):
-    pairs = build_true_match_pairs(
-        ground_truth
-    )
+# ============================================================
+# PREPROCESSING COLLISION ANALYSIS
+# ============================================================
 
-    source1 = load_tsv(
-        PROCESSED_FILES["train_source1"],
-        usecols=[
-            "entity_id",
-            "business_name",
-            "business_address",
-            "business_name_clean",
-            "business_name_core",
-            "business_name_compact",
-            "business_name_ascii",
-            "business_name_core_ascii",
-            "business_name_token_sorted",
-            "business_address_clean",
-            "address_compact",
-            "business_address_ascii",
-            "business_address_token_sorted",
-            "address_numbers",
-            "country_clean"
-        ]
-    )
+print("\n" + "=" * 80)
+print("PROCESSED COLLISION ANALYSIS")
+print("=" * 80)
 
-    source1 = source1.rename(
-        columns={
-            column: f"s1_{column}"
-            for column in source1.columns
-        }
-    )
+processed_datasets = {
+    "train_source1": train_source1_processed,
+    "train_source2": train_source2_processed,
+    "train_source3": train_source3_processed,
+    "test_source1": test_source1_processed,
+    "test_source2": test_source2_processed,
+    "test_source3": test_source3_processed,
+}
 
-    pairs_eval = pairs.merge(
-        source1,
-        left_on="source1_entity_id",
-        right_on="s1_entity_id",
-        how="left"
-    )
 
-    del source1
+processed_collision_rows = []
 
-    results = []
+for dataset_name, df in processed_datasets.items():
 
-    target_columns = [
-        "entity_id",
-        "business_name",
-        "business_address",
+    for field in [
         "business_name_clean",
         "business_name_core",
         "business_name_compact",
-        "business_name_ascii",
-        "business_name_core_ascii",
-        "business_name_token_sorted",
         "business_address_clean",
         "address_compact",
-        "business_address_ascii",
-        "business_address_token_sorted",
-        "address_numbers",
-        "country_clean"
-    ]
-
-    for source_name in [
-        "train_source2",
-        "train_source3"
     ]:
-        target = load_tsv(
-            PROCESSED_FILES[source_name],
-            usecols=target_columns
+
+        stats = collision_stats(
+            df,
+            field,
         )
 
-        target = target.rename(
-            columns={
-                column: f"m_{column}"
-                for column in target.columns
-            }
-        )
-
-        relevant_ids = set(
-            pairs_eval[
-                "matched_entity_id"
-            ]
-            .dropna()
-            .astype(str)
-        )
-
-        target = target[
-            target["m_entity_id"]
-            .astype(str)
-            .isin(relevant_ids)
-        ]
-
-        prefix = (
-            "S2-"
-            if source_name.endswith("2")
-            else "S3-"
-        )
-
-        pairs_source = pairs_eval[
-            pairs_eval["matched_entity_id"]
-            .astype(str)
-            .str.startswith(prefix)
-        ]
-
-        merged = pairs_source.merge(
-            target,
-            left_on="matched_entity_id",
-            right_on="m_entity_id",
-            how="left"
-        )
-
-        results.append(
-            merged
-        )
-
-        del target
-        del pairs_source
-
-    pairs_eval = pd.concat(
-        results,
-        ignore_index=True
-    )
-
-    del results
-
-    def exact_nonempty(left, right):
-        left = (
-            left.fillna("")
-            .astype(str)
-            .str.strip()
-        )
-
-        right = (
-            right.fillna("")
-            .astype(str)
-            .str.strip()
-        )
-
-        return (
-            (left != "")
-            & (right != "")
-            & (left == right)
-        )
-
-    pairs_eval["raw_name_exact"] = exact_nonempty(
-        pairs_eval["s1_business_name"],
-        pairs_eval["m_business_name"]
-    )
-
-    pairs_eval["clean_name_exact"] = exact_nonempty(
-        pairs_eval["s1_business_name_clean"],
-        pairs_eval["m_business_name_clean"]
-    )
-
-    pairs_eval["core_name_exact"] = exact_nonempty(
-        pairs_eval["s1_business_name_core"],
-        pairs_eval["m_business_name_core"]
-    )
-
-    pairs_eval["ascii_name_exact"] = exact_nonempty(
-        pairs_eval["s1_business_name_ascii"],
-        pairs_eval["m_business_name_ascii"]
-    )
-
-    pairs_eval["token_sorted_name_exact"] = exact_nonempty(
-        pairs_eval["s1_business_name_token_sorted"],
-        pairs_eval["m_business_name_token_sorted"]
-    )
-
-    pairs_eval["raw_address_exact"] = exact_nonempty(
-        pairs_eval["s1_business_address"],
-        pairs_eval["m_business_address"]
-    )
-
-    pairs_eval["clean_address_exact"] = exact_nonempty(
-        pairs_eval["s1_business_address_clean"],
-        pairs_eval["m_business_address_clean"]
-    )
-
-    pairs_eval["ascii_address_exact"] = exact_nonempty(
-        pairs_eval["s1_business_address_ascii"],
-        pairs_eval["m_business_address_ascii"]
-    )
-
-    pairs_eval["token_sorted_address_exact"] = exact_nonempty(
-        pairs_eval["s1_business_address_token_sorted"],
-        pairs_eval["m_business_address_token_sorted"]
-    )
-
-    pairs_eval["numbers_exact"] = exact_nonempty(
-        pairs_eval["s1_address_numbers"],
-        pairs_eval["m_address_numbers"]
-    )
-
-    pairs_eval["country_exact"] = exact_nonempty(
-        pairs_eval["s1_country_clean"],
-        pairs_eval["m_country_clean"]
-    )
-
-    agreement_fields = [
-        "raw_name_exact",
-        "clean_name_exact",
-        "core_name_exact",
-        "ascii_name_exact",
-        "token_sorted_name_exact",
-        "raw_address_exact",
-        "clean_address_exact",
-        "ascii_address_exact",
-        "token_sorted_address_exact",
-        "numbers_exact",
-        "country_exact"
-    ]
-
-    rows = []
-
-    for field in agreement_fields:
-        exact_count = int(
-            pairs_eval[field].sum()
-        )
-
-        rows.append({
-            "measure": field,
-            "exact_pairs": exact_count,
-            "total_true_pairs": len(
-                pairs_eval
-            ),
-            "exact_percentage": round(
-                exact_count
-                / len(pairs_eval)
-                * 100,
-                4
-            )
+        processed_collision_rows.append({
+            "dataset": dataset_name,
+            "field": field,
+            **stats,
         })
 
-    return pd.DataFrame(rows)
+
+processed_collision_report = pd.DataFrame(
+    processed_collision_rows
+)
+
+print(
+    processed_collision_report.to_string(index=False)
+)
+
+processed_collision_report.to_csv(
+    EDA_DIR / "processed_collision_report.tsv",
+    sep="\t",
+    index=False,
+)
 
 
-def create_visualizations(
-    ground_truth
-):
-    train_sources = {
-        "Source 1": SOURCE_FILES[
-            "train_source1"
-        ],
-        "Source 2": SOURCE_FILES[
-            "train_source2"
-        ],
-        "Source 3": SOURCE_FILES[
-            "train_source3"
-        ]
+# ============================================================
+# TRUE MATCH PAIRS
+# ============================================================
+
+print("\n" + "=" * 80)
+print("TRUE MATCH PREPROCESSING EVALUATION")
+print("=" * 80)
+
+
+pairs = gt[
+    [
+        "source1_entity_id",
+        "matched_ids_list",
+    ]
+].copy()
+
+pairs = pairs.explode(
+    "matched_ids_list"
+)
+
+pairs = pairs.rename(
+    columns={
+        "matched_ids_list": "matched_entity_id"
     }
+)
 
-    plt.figure(
-        figsize=(10, 6)
+pairs = pairs[
+    pairs["matched_entity_id"]
+    .fillna("")
+    .astype(str)
+    .str.strip()
+    != ""
+]
+
+
+# Prefix columns so we can compare S1 and matched S2/S3.
+s1_eval = (
+    train_source1_processed
+    .add_prefix("s1_")
+)
+
+s23_eval = pd.concat(
+    [
+        train_source2_processed.assign(match_source="S2"),
+        train_source3_processed.assign(match_source="S3"),
+    ],
+    ignore_index=True,
+)
+
+s23_eval = s23_eval.add_prefix("m_")
+
+
+pairs_eval = pairs.merge(
+    s1_eval,
+    left_on="source1_entity_id",
+    right_on="s1_entity_id",
+    how="left",
+)
+
+pairs_eval = pairs_eval.merge(
+    s23_eval,
+    left_on="matched_entity_id",
+    right_on="m_entity_id",
+    how="left",
+)
+
+
+print(
+    "Number of known true match pairs:",
+    len(pairs_eval),
+)
+
+
+# ============================================================
+# EXACT AGREEMENT FUNCTIONS
+# ============================================================
+
+def exact_nonempty(
+    left: pd.Series,
+    right: pd.Series,
+) -> pd.Series:
+
+    left = (
+        left.fillna("")
+        .astype(str)
+        .str.strip()
     )
 
-    for dataset_name, path in train_sources.items():
-        df = load_tsv(
-            path,
-            usecols=["business_name"]
+    right = (
+        right.fillna("")
+        .astype(str)
+        .str.strip()
+    )
+
+    return (
+        (left != "")
+        & (right != "")
+        & (left == right)
+    )
+
+
+pairs_eval["raw_name_exact"] = exact_nonempty(
+    pairs_eval["s1_business_name"],
+    pairs_eval["m_business_name"],
+)
+
+pairs_eval["clean_name_exact"] = exact_nonempty(
+    pairs_eval["s1_business_name_clean"],
+    pairs_eval["m_business_name_clean"],
+)
+
+pairs_eval["core_name_exact"] = exact_nonempty(
+    pairs_eval["s1_business_name_core"],
+    pairs_eval["m_business_name_core"],
+)
+
+pairs_eval["ascii_name_exact"] = exact_nonempty(
+    pairs_eval["s1_business_name_ascii"],
+    pairs_eval["m_business_name_ascii"],
+)
+
+pairs_eval["raw_address_exact"] = exact_nonempty(
+    pairs_eval["s1_business_address"],
+    pairs_eval["m_business_address"],
+)
+
+pairs_eval["clean_address_exact"] = exact_nonempty(
+    pairs_eval["s1_business_address_clean"],
+    pairs_eval["m_business_address_clean"],
+)
+
+pairs_eval["ascii_address_exact"] = exact_nonempty(
+    pairs_eval["s1_business_address_ascii"],
+    pairs_eval["m_business_address_ascii"],
+)
+
+pairs_eval["numbers_exact"] = exact_nonempty(
+    pairs_eval["s1_address_numbers"],
+    pairs_eval["m_address_numbers"],
+)
+
+pairs_eval["country_exact"] = exact_nonempty(
+    pairs_eval["s1_country_clean"],
+    pairs_eval["m_country_clean"],
+)
+
+pairs_eval["clean_name_or_address_exact"] = (
+    pairs_eval["clean_name_exact"]
+    | pairs_eval["clean_address_exact"]
+)
+
+pairs_eval["clean_name_and_address_exact"] = (
+    pairs_eval["clean_name_exact"]
+    & pairs_eval["clean_address_exact"]
+)
+
+
+# ============================================================
+# AGREEMENT REPORT
+# ============================================================
+
+agreement_fields = [
+    "raw_name_exact",
+    "clean_name_exact",
+    "core_name_exact",
+    "ascii_name_exact",
+    "raw_address_exact",
+    "clean_address_exact",
+    "ascii_address_exact",
+    "numbers_exact",
+    "country_exact",
+    "clean_name_or_address_exact",
+    "clean_name_and_address_exact",
+]
+
+
+agreement_rows = []
+
+for field in agreement_fields:
+
+    exact_count = int(
+        pairs_eval[field].sum()
+    )
+
+    agreement_rows.append({
+        "measure": field,
+        "exact_pairs": exact_count,
+        "total_true_pairs": len(pairs_eval),
+        "exact_percentage": round(
+            exact_count
+            / len(pairs_eval)
+            * 100,
+            4,
+        ),
+    })
+
+
+agreement_report = pd.DataFrame(
+    agreement_rows
+)
+
+print(
+    agreement_report.to_string(index=False)
+)
+
+agreement_report.to_csv(
+    EDA_DIR / "true_match_preprocessing_evaluation.tsv",
+    sep="\t",
+    index=False,
+)
+
+
+# ============================================================
+# NORMALIZATION GAIN
+# ============================================================
+
+def percentage_for(
+    report: pd.DataFrame,
+    measure: str,
+) -> float:
+
+    row = report[
+        report["measure"] == measure
+    ]
+
+    if row.empty:
+        return 0.0
+
+    return float(
+        row.iloc[0]["exact_percentage"]
+    )
+
+
+raw_name = percentage_for(
+    agreement_report,
+    "raw_name_exact",
+)
+
+clean_name = percentage_for(
+    agreement_report,
+    "clean_name_exact",
+)
+
+core_name = percentage_for(
+    agreement_report,
+    "core_name_exact",
+)
+
+raw_address = percentage_for(
+    agreement_report,
+    "raw_address_exact",
+)
+
+clean_address = percentage_for(
+    agreement_report,
+    "clean_address_exact",
+)
+
+
+print("\nNormalization gains")
+
+print(
+    f"Name raw -> clean: "
+    f"{clean_name - raw_name:+.4f} percentage points"
+)
+
+print(
+    f"Name clean -> core: "
+    f"{core_name - clean_name:+.4f} percentage points"
+)
+
+print(
+    f"Address raw -> clean: "
+    f"{clean_address - raw_address:+.4f} percentage points"
+)
+
+
+# ============================================================
+# SHOW TRUE MATCH EXAMPLES RESCUED BY NORMALIZATION
+# ============================================================
+
+example_columns = [
+    "source1_entity_id",
+    "matched_entity_id",
+    "s1_business_name",
+    "m_business_name",
+    "s1_business_name_clean",
+    "m_business_name_clean",
+    "s1_business_name_core",
+    "m_business_name_core",
+    "s1_business_address",
+    "m_business_address",
+    "s1_business_address_clean",
+    "m_business_address_clean",
+]
+
+
+rescued_name_examples = pairs_eval[
+    (~pairs_eval["raw_name_exact"])
+    & pairs_eval["clean_name_exact"]
+][example_columns].head(50)
+
+rescued_core_examples = pairs_eval[
+    (~pairs_eval["clean_name_exact"])
+    & pairs_eval["core_name_exact"]
+][example_columns].head(50)
+
+rescued_address_examples = pairs_eval[
+    (~pairs_eval["raw_address_exact"])
+    & pairs_eval["clean_address_exact"]
+][example_columns].head(50)
+
+
+rescued_name_examples.to_csv(
+    EDA_DIR / "name_normalization_rescued_examples.tsv",
+    sep="\t",
+    index=False,
+)
+
+rescued_core_examples.to_csv(
+    EDA_DIR / "core_name_rescued_examples.tsv",
+    sep="\t",
+    index=False,
+)
+
+rescued_address_examples.to_csv(
+    EDA_DIR / "address_normalization_rescued_examples.tsv",
+    sep="\t",
+    index=False,
+)
+
+
+print("\nExamples rescued by name normalization:")
+print(
+    rescued_name_examples.to_string(index=False)
+)
+
+print("\nExamples rescued by legal-suffix/core normalization:")
+print(
+    rescued_core_examples.to_string(index=False)
+)
+
+print("\nExamples rescued by address normalization:")
+print(
+    rescued_address_examples.to_string(index=False)
+)
+
+
+# ============================================================
+# NORMALIZATION TRANSFORMATION AUDIT
+# ============================================================
+
+print("\n" + "=" * 80)
+print("NORMALIZATION TRANSFORMATION AUDIT")
+print("=" * 80)
+
+
+transformation_rows = []
+
+for dataset_name, original_df in {
+    "train_source1": train_source1,
+    "train_source2": train_source2,
+    "train_source3": train_source3,
+    "test_source1": test_source1,
+    "test_source2": test_source2,
+    "test_source3": test_source3,
+}.items():
+
+    processed_df = processed_datasets[
+        dataset_name
+    ]
+
+    for i in range(len(original_df)):
+
+        raw_name = str(
+            original_df.iloc[i]["business_name"]
         )
 
-        values = (
-            df["business_name"]
-            .fillna("")
-            .astype("string")
-            .str.len()
+        clean_name = str(
+            processed_df.iloc[i]["business_name_clean"]
         )
 
-        upper = values.quantile(
-            0.99
+        core_name = str(
+            processed_df.iloc[i]["business_name_core"]
         )
 
-        values = values[
-            values <= upper
-        ]
-
-        plt.hist(
-            values,
-            bins=40,
-            histtype="step",
-            density=True,
-            label=dataset_name
+        raw_address = str(
+            original_df.iloc[i]["business_address"]
         )
 
-        del df
-
-    plt.title(
-        "Business Name Length Distribution"
-    )
-    plt.xlabel("Characters")
-    plt.ylabel("Density")
-    plt.legend()
-    plt.tight_layout()
-
-    plt.savefig(
-        EDA_DIR / "business_name_length.png",
-        dpi=150
-    )
-
-    plt.close()
-
-    plt.figure(
-        figsize=(10, 6)
-    )
-
-    for dataset_name, path in train_sources.items():
-        df = load_tsv(
-            path,
-            usecols=["business_address"]
+        clean_address = str(
+            processed_df.iloc[i]["business_address_clean"]
         )
 
-        values = (
-            df["business_address"]
-            .fillna("")
-            .astype("string")
-            .str.len()
-        )
+        if (
+            raw_name != clean_name
+            or clean_name != core_name
+            or raw_address != clean_address
+        ):
 
-        upper = values.quantile(
-            0.99
-        )
+            transformation_rows.append({
+                "dataset": dataset_name,
+                "entity_id": str(
+                    original_df.iloc[i]["entity_id"]
+                ),
+                "raw_name": raw_name,
+                "clean_name": clean_name,
+                "core_name": core_name,
+                "raw_address": raw_address,
+                "clean_address": clean_address,
+            })
 
-        values = values[
-            values <= upper
-        ]
+        # We only need examples, not every transformed row.
+        if len(transformation_rows) >= 5000:
+            break
 
-        plt.hist(
-            values,
-            bins=40,
-            histtype="step",
-            density=True,
-            label=dataset_name
-        )
 
-        del df
+transformation_audit = pd.DataFrame(
+    transformation_rows
+)
 
-    plt.title(
-        "Business Address Length Distribution"
-    )
-    plt.xlabel("Characters")
-    plt.ylabel("Density")
-    plt.legend()
-    plt.tight_layout()
+transformation_audit.to_csv(
+    EDA_DIR / "normalization_transformation_audit.tsv",
+    sep="\t",
+    index=False,
+)
 
-    plt.savefig(
-        EDA_DIR / "business_address_length.png",
-        dpi=150
-    )
+print(
+    "Transformation examples saved:",
+    len(transformation_audit),
+)
 
-    plt.close()
 
-    match_counts = (
-        ground_truth["num_matches"]
-        .value_counts()
-        .sort_index()
-    )
+# ============================================================
+# VISUALIZATION 1:
+# BUSINESS NAME LENGTH
+# ============================================================
 
-    plt.figure(
-        figsize=(10, 6)
-    )
+plt.figure(figsize=(10, 6))
 
-    plt.bar(
-        match_counts.index.astype(str),
-        match_counts.to_numpy()
-    )
+for dataset_name, df in {
+    "Source 1": train_source1,
+    "Source 2": train_source2,
+    "Source 3": train_source3,
+}.items():
 
-    plt.title(
-        "Number of Matches per Source 1 Entity"
-    )
-    plt.xlabel("Number of matches")
-    plt.ylabel(
-        "Number of Source 1 entities"
-    )
-    plt.tight_layout()
-
-    plt.savefig(
-        EDA_DIR / "ground_truth_match_counts.png",
-        dpi=150
+    values = (
+        df["business_name"]
+        .fillna("")
+        .astype("string")
+        .str.len()
     )
 
-    plt.close()
+    upper = values.quantile(0.99)
 
+    values = values[
+        values <= upper
+    ]
 
-def main():
-    print("Running dataset analysis...")
-
-    dataset_summary = build_dataset_summary()
-
-    dataset_summary.to_csv(
-        EDA_DIR / "dataset_summary.tsv",
-        sep="\t",
-        index=False
+    plt.hist(
+        values,
+        bins=40,
+        histtype="step",
+        density=True,
+        label=dataset_name,
     )
 
-    print("Dataset summary saved.")
+plt.title(
+    "Business Name Length Distribution"
+)
 
-    field_quality = build_field_quality()
+plt.xlabel("Characters")
+plt.ylabel("Density")
+plt.legend()
+plt.tight_layout()
 
-    field_quality.to_csv(
-        EDA_DIR / "field_quality.tsv",
-        sep="\t",
-        index=False
+plt.savefig(
+    EDA_DIR / "business_name_length.png",
+    dpi=150,
+)
+
+plt.close()
+
+
+# ============================================================
+# VISUALIZATION 2:
+# ADDRESS LENGTH
+# ============================================================
+
+plt.figure(figsize=(10, 6))
+
+for dataset_name, df in {
+    "Source 1": train_source1,
+    "Source 2": train_source2,
+    "Source 3": train_source3,
+}.items():
+
+    values = (
+        df["business_address"]
+        .fillna("")
+        .astype("string")
+        .str.len()
     )
 
-    print("Field quality report saved.")
+    upper = values.quantile(0.99)
 
-    raw_collision_report = (
-        build_raw_collision_report()
+    values = values[
+        values <= upper
+    ]
+
+    plt.hist(
+        values,
+        bins=40,
+        histtype="step",
+        density=True,
+        label=dataset_name,
     )
 
-    raw_collision_report.to_csv(
-        EDA_DIR / "raw_collision_report.tsv",
-        sep="\t",
-        index=False
-    )
+plt.title(
+    "Business Address Length Distribution"
+)
 
-    print("Raw collision report saved.")
+plt.xlabel("Characters")
+plt.ylabel("Density")
+plt.legend()
+plt.tight_layout()
 
-    country_report = build_country_report()
+plt.savefig(
+    EDA_DIR / "business_address_length.png",
+    dpi=150,
+)
 
-    country_report.to_csv(
-        EDA_DIR / "country_distribution.tsv",
-        sep="\t",
-        index=False
-    )
+plt.close()
 
-    print("Country distribution saved.")
 
-    length_report = build_length_report()
+# ============================================================
+# VISUALIZATION 3:
+# MATCH COUNT
+# ============================================================
 
-    length_report.to_csv(
-        EDA_DIR / "length_report.tsv",
-        sep="\t",
-        index=False
-    )
+match_counts = (
+    ground_truth["num_matches"]
+    .value_counts()
+    .sort_index()
+)
 
-    print("Length report saved.")
+plt.figure(figsize=(10, 6))
 
-    print("Analyzing ground truth...")
+plt.bar(
+    match_counts.index.astype(str),
+    match_counts.to_numpy(),
+)
 
-    ground_truth = load_ground_truth()
+plt.title(
+    "Number of Matches per Source 1 Entity"
+)
 
-    gt, ground_truth_summary = (
-        build_ground_truth_analysis(
-            ground_truth
-        )
-    )
+plt.xlabel("Number of matches")
+plt.ylabel("Number of Source 1 entities")
 
-    ground_truth_summary.to_csv(
-        EDA_DIR / "ground_truth_match_distribution.tsv",
-        sep="\t",
-        index=False
-    )
+plt.tight_layout()
 
-    gt[
-        [
-            "source1_entity_id",
-            "matched_entity_ids",
-            "num_matches"
-        ]
-    ].to_csv(
-        EDA_DIR / "ground_truth_parsed.tsv",
-        sep="\t",
-        index=False
-    )
+plt.savefig(
+    EDA_DIR / "ground_truth_match_counts.png",
+    dpi=150,
+)
 
-    print("Ground truth reports saved.")
+plt.close()
 
-    print("Analyzing processed representations...")
+plt.close()
 
-    processed_collision_report = (
-        build_processed_collision_report()
-    )
 
-    processed_collision_report.to_csv(
-        EDA_DIR / "processed_collision_report.tsv",
-        sep="\t",
-        index=False
-    )
+# ============================================================
+# FINAL SUMMARY
+# ============================================================
 
-    print("Processed collision report saved.")
+print("\n" + "=" * 80)
+print("EDA COMPLETE")
+print("=" * 80)
 
-    print("Auditing preprocessing transformations...")
+print(
+    f"All reports written to:\n{EDA_DIR}"
+)
 
-    transformation_audit = (
-        build_transformation_examples(
-            sample_size=1000
-        )
-    )
+print("\nImportant files:")
 
-    transformation_audit.to_csv(
-        EDA_DIR / "normalization_transformation_audit.tsv",
-        sep="\t",
-        index=False
-    )
-
-    print("Transformation audit saved.")
+for filename in [
+    "dataset_summary.tsv",
+    "field_quality.tsv",
+    "raw_collision_report.tsv",
+    "country_distribution.tsv",
+    "ground_truth_match_distribution.tsv",
+    "processed_collision_report.tsv",
+    "true_match_preprocessing_evaluation.tsv",
+    "name_normalization_rescued_examples.tsv",
+    "core_name_rescued_examples.tsv",
+    "address_normalization_rescued_examples.tsv",
+]:
 
     print(
-        "Evaluating preprocessing on known true matches..."
+        f"  - {filename}"
     )
-
-    agreement_report = (
-        build_true_match_preprocessing_evaluation(
-            ground_truth
-        )
-    )
-
-    agreement_report.to_csv(
-        EDA_DIR / "true_match_preprocessing_evaluation.tsv",
-        sep="\t",
-        index=False
-    )
-
-    print(
-        "True-match preprocessing evaluation saved."
-    )
-
-    create_visualizations(
-        gt
-    )
-
-    print("Visualizations saved.")
-    print(f"EDA reports saved in: {EDA_DIR}")
-
-
-if __name__ == "__main__":
-    main()
